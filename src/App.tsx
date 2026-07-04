@@ -5,9 +5,11 @@ import { Online } from "./pages/Online";
 import { Editor } from "./pages/Editor";
 import { Export } from "./pages/Export";
 
+const basename = process.env.NODE_ENV === 'production' ? '/bead-world' : '';
+
 export default function App() {
   return (
-    <Router>
+    <Router basename={basename}>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/generator" element={<Generator />} />

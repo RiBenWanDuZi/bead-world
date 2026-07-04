@@ -45,7 +45,7 @@ function isSkinColor(r: number, g: number, b: number): boolean {
   );
 }
 
-function recoverDarkFeatures(
+function recoverFeatures(
   grid: string[][],
   rgbGrid: RGB[][],
   originalPixels: Pixel[][],
@@ -60,6 +60,11 @@ function recoverDarkFeatures(
   const scaleX = originalWidth / targetWidth;
   const scaleY = originalHeight / targetHeight;
   
+  const isSmallSize = targetWidth <= 60 || targetHeight <= 60;
+  const featureThreshold = isSmallSize ? 0.05 : 0.08;
+  const featureMinCount = isSmallSize ? 1 : 2;
+  const luminanceDiff = isSmallSize ? 30 : 40;
+  
   for (let ty = 0; ty < targetHeight; ty++) {
     for (let tx = 0; tx < targetWidth; tx++) {
       const currentRgb = rgbGrid[ty][tx];
@@ -71,6 +76,7 @@ function recoverDarkFeatures(
       const endY = Math.min(Math.floor((ty + 1) * scaleY), originalHeight);
       
       const darkPixels: Pixel[] = [];
+      const brightPixels: Pixel[] = [];
       let totalPixels = 0;
       
       for (let py = startY; py < endY; py++) {
@@ -79,30 +85,57 @@ function recoverDarkFeatures(
           if (pixel.a >= 128) {
             totalPixels++;
             const pixelLum = getLuminance(pixel.r, pixel.g, pixel.b);
-            if (currentLum - pixelLum > 40) {
+            
+            if (currentLum - pixelLum > luminanceDiff) {
               darkPixels.push(pixel);
+            }
+            if (pixelLum - currentLum > luminanceDiff) {
+              brightPixels.push(pixel);
             }
           }
         }
       }
       
-      if (totalPixels > 0 && darkPixels.length >= Math.max(2, totalPixels * 0.08)) {
-        const hasSkin = rgbGrid[ty][tx].r > 95 && rgbGrid[ty][tx].g > 40 && rgbGrid[ty][tx].b > 20;
-        
-        if (hasSkin || currentLum > 60) {
-          const sortedDarkPixels = [...darkPixels].sort((a, b) => 
-            getLuminance(a.r, a.g, a.b) - getLuminance(b.r, b.g, b.b)
-          );
+      let shouldRecover = false;
+      let recoveredRgb = currentRgb;
+      
+      if (totalPixels > 0) {
+        if (darkPixels.length >= Math.max(featureMinCount, totalPixels * featureThreshold)) {
+          const hasSkin = rgbGrid[ty][tx].r > 95 && rgbGrid[ty][tx].g > 40 && rgbGrid[ty][tx].b > 20;
           
-          const medianIndex = Math.floor(sortedDarkPixels.length / 2);
-          const medianPixel = sortedDarkPixels[medianIndex];
+          if (hasSkin || currentLum > 50) {
+            const sortedDarkPixels = [...darkPixels].sort((a, b) => 
+              getLuminance(a.r, a.g, a.b) - getLuminance(b.r, b.g, b.b)
+            );
+            
+            const medianIndex = Math.floor(sortedDarkPixels.length / 2);
+            const medianPixel = sortedDarkPixels[medianIndex];
+            
+            recoveredRgb = { r: medianPixel.r, g: medianPixel.g, b: medianPixel.b };
+            shouldRecover = true;
+          }
+        } else if (brightPixels.length >= Math.max(featureMinCount, totalPixels * featureThreshold)) {
+          const hasDark = currentLum < 150;
           
-          const recoveredRgb = { r: medianPixel.r, g: medianPixel.g, b: medianPixel.b };
-          newRgbGrid[ty][tx] = recoveredRgb;
-          
-          const closestColor = findClosestColor(recoveredRgb);
-          newGrid[ty][tx] = closestColor.id;
+          if (hasDark) {
+            const sortedBrightPixels = [...brightPixels].sort((a, b) => 
+              getLuminance(b.r, b.g, b.b) - getLuminance(a.r, a.g, a.b)
+            );
+            
+            const medianIndex = Math.floor(sortedBrightPixels.length / 2);
+            const medianPixel = sortedBrightPixels[medianIndex];
+            
+            recoveredRgb = { r: medianPixel.r, g: medianPixel.g, b: medianPixel.b };
+            shouldRecover = true;
+          }
         }
+      }
+      
+      if (shouldRecover) {
+        newRgbGrid[ty][tx] = recoveredRgb;
+        
+        const closestColor = findClosestColor(recoveredRgb);
+        newGrid[ty][tx] = closestColor.id;
       }
     }
   }
@@ -197,7 +230,7 @@ export function pixelateImage(
     rgbGrid.push(rgbRow);
   }
 
-  const recovered = recoverDarkFeatures(grid, rgbGrid, originalPixels, img.width, img.height, width, height);
+  const recovered = recoverFeatures(grid, rgbGrid, originalPixels, img.width, img.height, width, height);
 
   return recovered;
 }
